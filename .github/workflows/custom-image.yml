@@ -1,0 +1,63 @@
+name: Custom Image (GHCR)
+
+# 自定义镜像：push 到 custom 分支或手动触发时构建，推送到 ghcr.io/<owner>/sub2api
+on:
+  push:
+    branches:
+      - custom
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: custom-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASE_VERSION: 0.2.25
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare tags
+        id: meta
+        run: |
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          short="$(git rev-parse --short HEAD)"
+          image="ghcr.io/${owner}/sub2api"
+          {
+            echo "image=${image}"
+            echo "short=${short}"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "tags=${image}:latest,${image}:${BASE_VERSION}-plaza,${image}:${BASE_VERSION}-plaza-${short}"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VERSION=${{ env.BASE_VERSION }}
+            COMMIT=${{ steps.meta.outputs.short }}
+            DATE=${{ steps.meta.outputs.date }}
+            GOPROXY=https://proxy.golang.org,direct
+            GOSUMDB=sum.golang.org
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

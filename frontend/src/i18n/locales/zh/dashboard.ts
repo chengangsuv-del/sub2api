@@ -670,7 +670,25 @@ export default {
       rateLabel: '倍率',
       modelLabel: '模型',
       searchPlaceholder: '搜索模型名称',
+      allGroups: '全部分组',
+      allRates: '全部倍率',
+      viewGrid: '卡片视图',
+      viewList: '列表视图',
       all: '全部'
+    },
+    stats: {
+      models: '个模型',
+      platforms: '个平台',
+      groups: '个分组',
+      autoSync: '模型与价格自动同步'
+    },
+    card: {
+      via: '通过 {platform} 平台接入，可查看各分组的实际调用价格。',
+      tokenBilling: 'Token 计费',
+      timePricing: '分时',
+      officialRef: '官方参考',
+      noOfficial: '暂无官方参考价',
+      viewDetail: '查看详情'
     },
     badges: {
       exclusive: '专属分组',

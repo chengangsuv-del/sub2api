@@ -665,7 +665,25 @@ export default {
       rateLabel: 'Rate',
       modelLabel: 'Model',
       searchPlaceholder: 'Search models',
+      allGroups: 'All groups',
+      allRates: 'All rates',
+      viewGrid: 'Card view',
+      viewList: 'List view',
       all: 'All'
+    },
+    stats: {
+      models: 'models',
+      platforms: 'platforms',
+      groups: 'groups',
+      autoSync: 'Models and prices sync automatically'
+    },
+    card: {
+      via: 'Served via {platform}. See the actual price for each group.',
+      tokenBilling: 'Token billing',
+      timePricing: 'Time-based',
+      officialRef: 'Official',
+      noOfficial: 'No official reference price',
+      viewDetail: 'Details'
     },
     badges: {
       exclusive: 'Exclusive',

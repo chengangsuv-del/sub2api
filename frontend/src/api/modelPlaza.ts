@@ -82,6 +82,9 @@ export interface ModelPlazaGroup {
   models: PlazaModel[]
 }
 
+/** 模型广场展示形态：卡片网格 / 分组价格表。 */
+export type PlazaViewMode = 'grid' | 'list'
+
 export interface ModelPlazaResponse {
   /** 管理员配置的全局价格说明（Markdown）。 */
   description: string

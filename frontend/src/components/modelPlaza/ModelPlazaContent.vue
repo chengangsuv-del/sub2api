@@ -33,7 +33,22 @@
       {{ t('modelPlaza.loadFailed') }}
     </div>
     <template v-else>
-      <!-- 筛选区:平台 → 分组 → 倍率 -->
+      <!-- 统计条 -->
+      <div
+        class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-primary-100/70 bg-gradient-to-r from-primary-50/80 to-white px-5 py-3 dark:border-primary-500/20 dark:from-primary-500/10 dark:to-dark-800/40"
+      >
+        <div class="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm text-gray-500 dark:text-dark-400">
+          <span><b class="mr-1 text-base text-gray-900 dark:text-white">{{ stats.models }}</b>{{ t('modelPlaza.stats.models') }}</span>
+          <span><b class="mr-1 text-base text-gray-900 dark:text-white">{{ stats.platforms }}</b>{{ t('modelPlaza.stats.platforms') }}</span>
+          <span><b class="mr-1 text-base text-gray-900 dark:text-white">{{ stats.groups }}</b>{{ t('modelPlaza.stats.groups') }}</span>
+        </div>
+        <span class="inline-flex items-center gap-1.5 text-xs text-primary-700 dark:text-primary-300">
+          <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>
+          {{ t('modelPlaza.stats.autoSync') }}
+        </span>
+      </div>
+
+      <!-- 筛选区:平台标签 + 搜索 / 分组 / 倍率 / 视图 -->
       <PlazaFilterBar
         :platforms="platforms"
         :groups="groupOptions"
@@ -42,16 +57,30 @@
         :group-id="selectedGroupId"
         :rate="selectedRate"
         :search="searchQuery"
+        :view-mode="viewMode"
         @update:platform="selectedPlatform = $event"
         @update:group-id="selectedGroupId = $event"
         @update:rate="selectedRate = $event"
         @update:search="searchQuery = $event"
+        @update:view-mode="setViewMode"
       />
 
-      <!-- 分组分节的模型清单(默认按生效倍率升序) -->
-      <div v-if="filteredGroups.length > 0" class="space-y-5">
-        <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" />
-      </div>
+      <template v-if="filteredGroups.length > 0">
+        <!-- 卡片视图:按分组倍率升序平铺所有 (分组, 模型) -->
+        <div v-if="viewMode === 'grid'" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <PlazaModelCard
+            v-for="item in cardItems"
+            :key="item.key"
+            :model="item.model"
+            :group="item.group"
+            @detail="openDetail(item.group, item.model)"
+          />
+        </div>
+        <!-- 列表视图:分组分节的价格表 -->
+        <div v-else class="space-y-5">
+          <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" />
+        </div>
+      </template>
       <div
         v-else
         class="rounded-2xl border border-dashed border-gray-300 px-5 py-12 text-center text-sm text-gray-500 dark:border-dark-600 dark:text-dark-400"
@@ -59,6 +88,17 @@
         {{ searchActive ? t('modelPlaza.noSearchResult') : t('modelPlaza.empty') }}
       </div>
     </template>
+
+    <!-- 模型详情:复用分组价格表,只放当前模型 -->
+    <BaseDialog
+      :show="detail !== null"
+      :title="detail?.model.name ?? ''"
+      width="full"
+      close-on-click-outside
+      @close="detail = null"
+    >
+      <PlazaGroupSection v-if="detail" :group="detailGroup!" />
+    </BaseDialog>
   </div>
 </template>
 
@@ -68,9 +108,11 @@ import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import Icon from '@/components/icons/Icon.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import PlazaFilterBar from './PlazaFilterBar.vue'
 import PlazaGroupSection from './PlazaGroupSection.vue'
-import type { ModelPlazaGroup, ModelPlazaResponse } from '@/api/modelPlaza'
+import PlazaModelCard from './PlazaModelCard.vue'
+import type { ModelPlazaGroup, ModelPlazaResponse, PlazaModel, PlazaViewMode } from '@/api/modelPlaza'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
@@ -84,6 +126,29 @@ const props = defineProps<{
 const { t } = useI18n()
 const authStore = useAuthStore()
 const isAuthenticated = computed(() => authStore.isAuthenticated)
+
+const VIEW_MODE_KEY = 'sub2api.modelPlaza.viewMode'
+
+function loadViewMode(): PlazaViewMode {
+  try {
+    const v = localStorage.getItem(VIEW_MODE_KEY)
+    if (v === 'grid' || v === 'list') return v
+  } catch {
+    /* 隐私模式等场景无 localStorage */
+  }
+  return 'grid'
+}
+
+const viewMode = ref<PlazaViewMode>(loadViewMode())
+
+function setViewMode(mode: PlazaViewMode) {
+  viewMode.value = mode
+  try {
+    localStorage.setItem(VIEW_MODE_KEY, mode)
+  } catch {
+    /* ignore */
+  }
+}
 
 const selectedPlatform = ref<string>('all')
 const selectedGroupId = ref<number | 'all'>('all')
@@ -103,12 +168,27 @@ function effectiveRate(g: ModelPlazaGroup): number {
   return g.user_rate_multiplier ?? g.rate_multiplier
 }
 
+const allGroups = computed(() => props.response?.groups ?? [])
+
+/** 顶部统计:模型按名称去重,平台取模型实际平台(Composite 分组会展开)。 */
+const stats = computed(() => {
+  const models = new Set<string>()
+  const platformSet = new Set<string>()
+  for (const g of allGroups.value) {
+    for (const m of g.models) {
+      models.add(m.name)
+      if (m.platform) platformSet.add(m.platform)
+    }
+  }
+  return { models: models.size, platforms: platformSet.size, groups: allGroups.value.length }
+})
+
 const platforms = computed(() =>
-  [...new Set((props.response?.groups ?? []).map((g) => g.platform).filter(Boolean))].sort()
+  [...new Set(allGroups.value.map((g) => g.platform).filter(Boolean))].sort()
 )
 
 const groupOptions = computed(() =>
-  (props.response?.groups ?? []).map((g) => ({
+  allGroups.value.map((g) => ({
     id: g.id,
     name: g.name,
     platform: g.platform,
@@ -118,7 +198,7 @@ const groupOptions = computed(() =>
 
 /** 全量生效倍率;当前组合下不可用的项由 FilterBar 置灰而非隐藏。 */
 const rates = computed(() =>
-  [...new Set((props.response?.groups ?? []).map(effectiveRate))].sort((a, b) => a - b)
+  [...new Set(allGroups.value.map(effectiveRate))].sort((a, b) => a - b)
 )
 
 /** 数据刷新后选中的倍率可能不复存在,重置为全部。 */
@@ -129,7 +209,7 @@ watch(rates, (list) => {
 })
 
 const filteredGroups = computed(() => {
-  let groups = props.response?.groups ?? []
+  let groups = allGroups.value
   if (selectedPlatform.value !== 'all') {
     groups = groups.filter((g) => g.platform === selectedPlatform.value)
   }
@@ -151,6 +231,23 @@ const filteredGroups = computed(() => {
     (a, b) => effectiveRate(a) - effectiveRate(b) || a.name.localeCompare(b.name)
   )
 })
+
+/** 卡片视图条目:同一模型在不同分组各占一张卡(价格/倍率不同)。 */
+const cardItems = computed(() =>
+  filteredGroups.value.flatMap((g) =>
+    g.models.map((m) => ({ key: `${g.id}:${m.platform}:${m.name}`, group: g, model: m }))
+  )
+)
+
+const detail = ref<{ group: ModelPlazaGroup; model: PlazaModel } | null>(null)
+
+function openDetail(group: ModelPlazaGroup, model: PlazaModel) {
+  detail.value = { group, model }
+}
+
+const detailGroup = computed<ModelPlazaGroup | null>(() =>
+  detail.value ? { ...detail.value.group, models: [detail.value.model] } : null
+)
 </script>
 
 <style scoped>
