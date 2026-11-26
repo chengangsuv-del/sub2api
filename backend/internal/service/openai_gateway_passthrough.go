@@ -1069,6 +1069,11 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	MarkResponseCommitted(c)
 	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
 
+	if account != nil && account.Platform == PlatformGrok && isGrokRequestScopedForbidden(resp.StatusCode, body) {
+		_, refusalErr := s.writeGrokPromptRefusal(ctx, c, account, resp, body)
+		return refusalErr
+	}
+
 	// cyber_policy 仍按原始 body 打内部标记，供 handler 事后写风控/邮件；面向客户端的
 	// 错误体在下方统一重建。cyber 是上游网络安全策略拦截，不冷却账号，
 	// 故下方跳过 handleOpenAIAccountUpstreamError（避免自定义 temp-unschedulable 规则误冷却）。

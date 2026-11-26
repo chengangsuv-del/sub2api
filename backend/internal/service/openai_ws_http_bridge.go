@@ -748,7 +748,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientMessage); changed {
 			clientMessage = rewritten
 		}
-		if account.Platform == PlatformGrok && isGrokPromptRefusal(http.StatusForbidden, bareErrorPayload) {
+		if account.Platform == PlatformGrok && isGrokRequestScopedForbidden(http.StatusForbidden, bareErrorPayload) {
 			if rewritten, changed := rewriteGrokRequestScopedForbiddenSSE(clientMessage); changed {
 				clientMessage = rewritten
 			}
@@ -917,7 +917,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				clientMessage = rewritten
 			}
 		}
-		if account.Platform == PlatformGrok && eventType == "error" && isGrokPromptRefusal(http.StatusForbidden, upstreamMessage) {
+		if account.Platform == PlatformGrok && eventType == "error" && isGrokRequestScopedForbidden(http.StatusForbidden, upstreamMessage) {
 			if rewritten, changed := rewriteGrokRequestScopedForbiddenSSE(clientMessage); changed {
 				clientMessage = rewritten
 			}

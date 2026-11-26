@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -54,20 +56,6 @@ func isGrokRequestScopedForbidden(statusCode int, responseBody []byte) bool {
 		return false
 	}
 	return true
-}
-
-// isGrokPromptRefusal is the subset of a request-scoped 403 caused by the
-// prompt itself: an explicit content-policy hit, or a bare 403 with no account
-// evidence. Structured non-policy 403s stay on the normal client path.
-func isGrokPromptRefusal(statusCode int, responseBody []byte) bool {
-	if !isGrokRequestScopedForbidden(statusCode, responseBody) {
-		return false
-	}
-	if isGrokContentPolicyRejection(statusCode, responseBody) {
-		return true
-	}
-	trimmed := strings.TrimSpace(string(responseBody))
-	return trimmed == "" || !gjson.Valid(trimmed) || gjson.Get(trimmed, "@this").Type == gjson.Null
 }
 
 func grokForbiddenHasAccountEvidence(responseBody []byte) bool {
@@ -241,6 +229,26 @@ const grokRequestScopedForbiddenClientMessage = "检测到违规 prefill，拒�
 // client must not be 401 or 403.
 func grokRequestScopedForbiddenClientStatus() int {
 	return http.StatusBadRequest
+}
+
+func (s *OpenAIGatewayService) writeGrokPromptRefusal(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, body []byte) (*OpenAIForwardResult, error) {
+	clientMsg := grokRequestScopedForbiddenClientMessage
+	if s != nil {
+		s.applyGrokForbiddenPolicy(ctx, account, body)
+	}
+	setOpsUpstreamError(c, resp.StatusCode, clientMsg, truncateString(string(body), 2048))
+	if c != nil {
+		writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, nil)
+		c.Writer.Header().Del("Content-Length")
+		MarkResponseCommitted(c)
+		c.JSON(grokRequestScopedForbiddenClientStatus(), gin.H{
+			"error": gin.H{
+				"type":    "invalid_request_error",
+				"message": clientMsg,
+			},
+		})
+	}
+	return nil, fmt.Errorf("grok content policy rejection: %s", clientMsg)
 }
 
 // rewriteGrokRequestScopedForbiddenSSE replaces a streamed request-scoped

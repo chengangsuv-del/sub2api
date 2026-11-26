@@ -117,14 +117,6 @@ func TestIsGrokContentPolicyRejection(t *testing.T) {
 	}
 }
 
-func TestIsGrokPromptRefusal(t *testing.T) {
-	require.True(t, isGrokPromptRefusal(http.StatusForbidden, nil))
-	require.True(t, isGrokPromptRefusal(http.StatusForbidden, []byte("   ")))
-	require.True(t, isGrokPromptRefusal(http.StatusForbidden, []byte(`{"error":{"code":"new_sensitive","message":"image is sensitive"}}`)))
-	require.False(t, isGrokPromptRefusal(http.StatusForbidden, []byte(`{"code":"permission-denied","error":"Access to the chat endpoint is denied"}`)))
-	require.False(t, isGrokPromptRefusal(http.StatusTooManyRequests, nil))
-}
-
 func TestRewriteGrokRequestScopedForbiddenSSERemovesAuthStatus(t *testing.T) {
 	raw := []byte(`{"error":{"code":"permission-denied","message":"403 permission denied"}}`)
 	got, changed := rewriteGrokRequestScopedForbiddenSSE(raw)
