@@ -134,6 +134,24 @@ func TestApplyToolNameRewriteToBody_RenamesToolUseWithDynamicMapping(t *testing.
 	require.Equal(t, "ok", gjson.GetBytes(out, "messages.1.content.0.content").String())
 }
 
+func TestApplyConvertedAnthropicCacheBreakpoints_AddsSystemAndLastMessage(t *testing.T) {
+	body := []byte(`{"system":[{"type":"text","text":"sys"}],"messages":[{"role":"user","content":[{"type":"text","text":"old"}]},{"role":"assistant","content":[{"type":"text","text":"done"}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"result"},{"type":"text","text":"next"}]}]}`)
+	out := applyConvertedAnthropicCacheBreakpoints(body)
+
+	require.Equal(t, "5m", gjson.GetBytes(out, "system.0.cache_control.ttl").String())
+	require.False(t, gjson.GetBytes(out, "messages.0.content.0.cache_control").Exists())
+	require.False(t, gjson.GetBytes(out, "messages.1.content.0.cache_control").Exists())
+	require.Equal(t, "5m", gjson.GetBytes(out, "messages.2.content.1.cache_control.ttl").String())
+}
+
+func TestApplyConvertedAnthropicCacheBreakpoints_PreservesExisting(t *testing.T) {
+	body := []byte(`{"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":[{"type":"text","text":"keep","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
+	out := applyConvertedAnthropicCacheBreakpoints(body)
+
+	require.Equal(t, "1h", gjson.GetBytes(out, "system.0.cache_control.ttl").String())
+	require.Equal(t, "1h", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
+}
+
 func TestApplyToolsLastCacheBreakpoint_InjectsDefault(t *testing.T) {
 	body := []byte(`{"tools":[{"name":"a","input_schema":{}},{"name":"b","input_schema":{}}]}`)
 	out := applyToolsLastCacheBreakpoint(body)
