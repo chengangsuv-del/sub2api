@@ -2014,7 +2014,12 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 	if s == nil || account == nil {
 		return
 	}
-	if isGrokContentPolicyRejection(statusCode, responseBody) {
+	if isGrokRequestScopedForbidden(statusCode, responseBody) {
+		// A bare 403 names this request. Do not apply the default entitlement
+		// cooldown, but keep an administrator's explicit keyword rule.
+		if statusCode == http.StatusForbidden {
+			s.applyGrokForbiddenPolicy(ctx, account, responseBody)
+		}
 		return
 	}
 	now := time.Now()
@@ -2072,7 +2077,11 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 			s.rateLimitGrok(ctx, account, grokSpendingLimitResetAt(account, time.Now()))
 			return
 		}
-		s.tempUnscheduleGrok(ctx, account, 30*time.Minute, "grok access or entitlement denied")
+		// Only an explicit account-evidence 403 reaches here. A bare or
+		// request-scoped 403 already returned above and must not cool the account.
+		if grokForbiddenHasAccountEvidence(responseBody) {
+			s.tempUnscheduleGrok(ctx, account, 30*time.Minute, "grok access or entitlement denied")
+		}
 	case http.StatusTooManyRequests:
 		// updateGrokUsageSnapshot installs rate-limit state for non-pool accounts.
 		// Free-usage 429 was already cooled above via body classification.

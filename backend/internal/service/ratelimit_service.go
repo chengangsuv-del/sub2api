@@ -1047,6 +1047,12 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 	if account.Platform == PlatformOpenAI || account.IsMultiProtocolAPIKey() {
 		return s.handleOpenAI403(ctx, account, upstreamMsg, responseBody)
 	}
+	// Grok reuses 403 for a request the prompt cannot run. Without account
+	// evidence that is not an auth failure, and the shared fallback must not
+	// SetError the account or rotate the pool.
+	if account.Platform == PlatformGrok && isGrokRequestScopedForbidden(http.StatusForbidden, responseBody) {
+		return false
+	}
 	// 非 Antigravity 平台：保持原有行为
 	msg := buildForbiddenErrorMessage(
 		"Access forbidden (403):",

@@ -866,7 +866,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				// mapper therefore defaults unknown xAI codes (for example
 				// new_sensitive) to 502; classify the body as a request-scoped
 				// 403 before applying status-based failover or account state.
-				if isGrokContentPolicyRejection(http.StatusForbidden, upstreamMessage) {
+				if isGrokRequestScopedForbidden(http.StatusForbidden, upstreamMessage) {
 					shouldFailover = false
 				} else {
 					shouldFailover = s.shouldFailoverGrokUpstreamError(statusCode, upstreamMessage)

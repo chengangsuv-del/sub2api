@@ -36,6 +36,39 @@ func isGrokContentPolicyRejection(statusCode int, responseBody []byte) bool {
 	return grokContentPolicyMessage(string(responseBody))
 }
 
+// isGrokRequestScopedForbidden reports a 403 that names this request, not the
+// account. xAI answers a prompt it will not run — including a jailbreak-style
+// system prompt — with a bare 403 (permission-denied, an empty body, or a
+// refusal that carries no suspension, subscription, credential, or quota
+// evidence). Cooling or failing over treats that as an account outage and
+// drains the pool. Account-evidence 403s stay on the normal cooldown path.
+func isGrokRequestScopedForbidden(statusCode int, responseBody []byte) bool {
+	if statusCode != http.StatusForbidden {
+		return false
+	}
+	if isGrokContentPolicyRejection(statusCode, responseBody) {
+		return true
+	}
+	if isGrokSpendingLimitError(responseBody) || grokForbiddenHasAccountEvidence(responseBody) {
+		return false
+	}
+	return true
+}
+
+func grokForbiddenHasAccountEvidence(responseBody []byte) bool {
+	if len(responseBody) == 0 {
+		return false
+	}
+	if grokAccountAccessMessage(string(responseBody)) {
+		return true
+	}
+	var payload any
+	if json.Unmarshal(responseBody, &payload) == nil && grokStructuredAccountAccessMarker(payload) {
+		return true
+	}
+	return false
+}
+
 func grokStructuredAccountAccessMarker(value any) bool {
 	switch node := value.(type) {
 	case map[string]any:
@@ -228,7 +261,7 @@ func grokUpstreamErrorCode(body []byte) string {
 // Free-usage / empty-output / billing bodies also failover even when the HTTP
 // status alone would not (e.g. 400 with free-usage-exhausted).
 func (s *OpenAIGatewayService) shouldFailoverGrokUpstreamError(statusCode int, responseBody []byte) bool {
-	if isGrokContentPolicyRejection(statusCode, responseBody) {
+	if isGrokRequestScopedForbidden(statusCode, responseBody) {
 		return false
 	}
 	// A 422 emitted by xAI's ModelInput decoder is account/runtime compatibility,

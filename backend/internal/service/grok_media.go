@@ -1288,7 +1288,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 		upstreamDetail = truncateString(string(body), maxBytes)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
-	if isGrokContentPolicyRejection(resp.StatusCode, body) {
+	if isGrokRequestScopedForbidden(resp.StatusCode, body) {
 		clientMsg := grokContentPolicyClientMessage(body)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),

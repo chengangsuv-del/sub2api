@@ -614,8 +614,9 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		}
 		return nil, fmt.Errorf("openai cyber_policy: %s", cyberMsg)
 	}
-	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(resp.StatusCode, body) {
+	if account != nil && account.Platform == PlatformGrok && isGrokRequestScopedForbidden(resp.StatusCode, body) {
 		clientMsg := grokContentPolicyClientMessage(body)
+		s.applyGrokForbiddenPolicy(ctx, account, body)
 		setOpsUpstreamError(c, resp.StatusCode, clientMsg, truncateString(string(body), 2048))
 		writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 		MarkResponseCommitted(c)
@@ -865,8 +866,13 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		}
 		return nil, fmt.Errorf("openai cyber_policy: %s", cyberMsg)
 	}
-	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(resp.StatusCode, body) {
+	if account != nil && account.Platform == PlatformGrok && isGrokRequestScopedForbidden(resp.StatusCode, body) {
 		clientMsg := grokContentPolicyClientMessage(body)
+		policyCtx := context.Background()
+		if c != nil && c.Request != nil {
+			policyCtx = c.Request.Context()
+		}
+		s.applyGrokForbiddenPolicy(policyCtx, account, body)
 		setOpsUpstreamError(c, resp.StatusCode, clientMsg, truncateString(string(body), 2048))
 		MarkResponseCommitted(c)
 		writeError(c, http.StatusForbidden, "invalid_request_error", clientMsg)

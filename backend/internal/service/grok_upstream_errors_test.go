@@ -312,6 +312,27 @@ func TestGrokPermissionDeniedContentRefusalDoesNotMutateOrFailover(t *testing.T)
 	require.False(t, svc.shouldFailoverGrokUpstreamError(http.StatusForbidden, body))
 }
 
+func TestGrokBare403DoesNotMutateOrFailover(t *testing.T) {
+	repo := &grokQuotaAccountRepo{}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	account := &Account{ID: 4786, Platform: PlatformGrok, Type: AccountTypeOAuth}
+	bodies := [][]byte{
+		nil,
+		[]byte(`{"code":"permission-denied","error":"Service temporarily unavailable"}`),
+		[]byte(`{"error":{"message":"grok access or entitlement denied"}}`),
+	}
+
+	for _, body := range bodies {
+		svc.handleGrokAccountUpstreamError(context.Background(), account, http.StatusForbidden, nil, body)
+
+		require.Zero(t, repo.tempUnschedCalls)
+		require.Zero(t, repo.rateLimitedCalls)
+		require.Zero(t, repo.updateCalls)
+		require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+		require.False(t, svc.shouldFailoverGrokUpstreamError(http.StatusForbidden, body))
+	}
+}
+
 func TestHandleGrokAccountUpstreamErrorEntitlement403KeepsDefaultCooldown(t *testing.T) {
 	repo := &grokQuotaAccountRepo{}
 	svc := &OpenAIGatewayService{accountRepo: repo}
@@ -347,7 +368,7 @@ func TestHandleGrokAccountUpstreamErrorDefaultCooldownsRespectPoolMode(t *testin
 					"pool_mode": true,
 				},
 			}
-			body := []byte(`{"error":{"message":"grok access or entitlement denied"}}`)
+			body := []byte(`{"error":{"code":"entitlement_required","message":"subscription required"}}`)
 
 			svc.handleGrokAccountUpstreamError(
 				context.Background(), account, statusCode, nil, body,
@@ -377,7 +398,7 @@ func TestHandleGrokAccountUpstreamErrorDefaultCooldownsRespectPoolMode(t *testin
 				"temp_unschedulable_rules": []any{
 					map[string]any{
 						"error_code":       float64(http.StatusForbidden),
-						"keywords":         []any{"entitlement denied"},
+						"keywords":         []any{"subscription required"},
 						"duration_minutes": float64(7),
 					},
 				},
@@ -387,7 +408,7 @@ func TestHandleGrokAccountUpstreamErrorDefaultCooldownsRespectPoolMode(t *testin
 
 		svc.handleGrokAccountUpstreamError(
 			context.Background(), account, http.StatusForbidden, nil,
-			[]byte(`{"error":{"message":"grok access or entitlement denied"}}`),
+			[]byte(`{"error":{"code":"entitlement_required","message":"subscription required"}}`),
 		)
 
 		require.Equal(t, 1, repo.tempUnschedCalls)
