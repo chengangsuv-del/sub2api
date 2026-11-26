@@ -73,9 +73,11 @@ func TestOpenAIConvertedRollingCacheBreakpoint(t *testing.T) {
 	}`)
 
 	out := applyOpenAIConvertedRollingCacheBreakpoint(body)
-	require.Equal(t, "5m", gjson.GetBytes(out, "messages.2.content.0.cache_control.ttl").String())
+	require.False(t, gjson.GetBytes(out, "messages.2.content.0.cache_control").Exists())
 	require.False(t, gjson.GetBytes(out, "messages.0.content.0.cache_control").Exists())
 	require.False(t, gjson.GetBytes(out, "messages.3.content.0.cache_control").Exists())
+	require.Equal(t, "text", gjson.GetBytes(out, "messages.3.content.1.type").String())
+	require.Equal(t, "5m", gjson.GetBytes(out, "messages.3.content.1.cache_control.ttl").String())
 	require.Equal(t, "5m", gjson.GetBytes(out, "system.0.cache_control.ttl").String())
 
 	marked := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"kept","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)

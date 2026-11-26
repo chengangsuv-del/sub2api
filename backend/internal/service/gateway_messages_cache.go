@@ -109,33 +109,42 @@ func (s *GatewayService) isRewriteMessageCacheControlEnabled(ctx context.Context
 // applyOpenAIConvertedRollingCacheBreakpoint 给只说 OpenAI 格式、再被转成
 // Anthropic 的请求补一个滚动断点。
 //
-// system 断点由转换链写在 system 文本块上。这里只补 messages 末尾这一处：
-// 从最后一条消息往前找最后一个可缓存块（text / image / document / tool_use /
-// tool_result）。thinking、redacted_thinking 不能挂 cache_control，跳过。
-// 目标块已有断点则不覆盖。直连 /v1/messages 不走这里。
+// 断点必须落在最后一条消息上。往前一条打会把后面的 thinking 留在断点之外，
+// 前缀停住，后续轮次读到的缓存不再增长。thinking 不能挂 cache_control，
+// 就在它后面补一个空格文本块再打。目标块已有断点则不覆盖。
+// 直连 /v1/messages 不走这里。
 func applyOpenAIConvertedRollingCacheBreakpoint(body []byte) []byte {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.IsArray() {
 		return body
 	}
 	arr := messages.Array()
-	for i := len(arr) - 1; i >= 0; i-- {
-		content := arr[i].Get("content")
-		if content.Type == gjson.String {
-			return injectCacheControlOnLastContentBlock(body, i, &arr[i])
-		}
-		if !content.IsArray() {
+	if len(arr) == 0 {
+		return body
+	}
+	idx := len(arr) - 1
+	content := arr[idx].Get("content")
+	if content.Type == gjson.String {
+		return injectCacheControlOnLastContentBlock(body, idx, &arr[idx])
+	}
+	if !content.IsArray() {
+		return body
+	}
+	blocks := content.Array()
+	for j := len(blocks) - 1; j >= 0; j-- {
+		switch blocks[j].Get("type").String() {
+		case "thinking", "redacted_thinking":
 			continue
+		case "text", "image", "document", "tool_use", "tool_result":
+			return injectCacheControlOnContentBlock(body, idx, j, &blocks[j])
 		}
-		blocks := content.Array()
-		for j := len(blocks) - 1; j >= 0; j-- {
-			switch blocks[j].Get("type").String() {
-			case "thinking", "redacted_thinking":
-				continue
-			case "text", "image", "document", "tool_use", "tool_result":
-				return injectCacheControlOnContentBlock(body, i, j, &blocks[j])
-			}
-		}
+	}
+	raw := fmt.Sprintf(
+		`{"type":"text","text":" ","cache_control":{"type":"ephemeral","ttl":%q}}`,
+		claude.DefaultCacheControlTTL,
+	)
+	if next, err := sjson.SetRawBytes(body, fmt.Sprintf("messages.%d.content.-1", idx), []byte(raw)); err == nil {
+		body = next
 	}
 	return body
 }
