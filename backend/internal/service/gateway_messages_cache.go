@@ -106,6 +106,40 @@ func (s *GatewayService) isRewriteMessageCacheControlEnabled(ctx context.Context
 	return false
 }
 
+// applyOpenAIConvertedRollingCacheBreakpoint 给只说 OpenAI 格式、再被转成
+// Anthropic 的请求补一个滚动断点。
+//
+// system 断点由转换链写在 system 文本块上。这里只补 messages 末尾这一处：
+// 从最后一条消息往前找最后一个可缓存块（text / image / document / tool_use /
+// tool_result）。thinking、redacted_thinking 不能挂 cache_control，跳过。
+// 目标块已有断点则不覆盖。直连 /v1/messages 不走这里。
+func applyOpenAIConvertedRollingCacheBreakpoint(body []byte) []byte {
+	messages := gjson.GetBytes(body, "messages")
+	if !messages.IsArray() {
+		return body
+	}
+	arr := messages.Array()
+	for i := len(arr) - 1; i >= 0; i-- {
+		content := arr[i].Get("content")
+		if content.Type == gjson.String {
+			return injectCacheControlOnLastContentBlock(body, i, &arr[i])
+		}
+		if !content.IsArray() {
+			continue
+		}
+		blocks := content.Array()
+		for j := len(blocks) - 1; j >= 0; j-- {
+			switch blocks[j].Get("type").String() {
+			case "thinking", "redacted_thinking":
+				continue
+			case "text", "image", "document", "tool_use", "tool_result":
+				return injectCacheControlOnContentBlock(body, i, j, &blocks[j])
+			}
+		}
+	}
+	return body
+}
+
 // injectCacheControlOnLastContentBlock 把 cache_control 断点打在 messages[idx]
 // 的最后一个 content block 上。若 content 是 string，先升级成单块 text 数组
 // （对齐 Parrot _inject_cache_on_msg 的行为）。
@@ -140,9 +174,15 @@ func injectCacheControlOnLastContentBlock(body []byte, idx int, msg *gjson.Resul
 		return body
 	}
 
-	pathPrefix := fmt.Sprintf("messages.%d.content.%d.cache_control", idx, lastBlockIdx)
-	existingCC := lastBlock.Get("cache_control")
-	if existingCC.Exists() {
+	return injectCacheControlOnContentBlock(body, idx, lastBlockIdx, &lastBlock)
+}
+
+func injectCacheControlOnContentBlock(body []byte, msgIdx, blockIdx int, block *gjson.Result) []byte {
+	if cc := block.Get("cache_control"); cc.Exists() && cc.Get("ttl").String() != "" {
+		return body
+	}
+	pathPrefix := fmt.Sprintf("messages.%d.content.%d.cache_control", msgIdx, blockIdx)
+	if block.Get("cache_control").Exists() {
 		if next, err := sjson.SetBytes(body, pathPrefix+".ttl", claude.DefaultCacheControlTTL); err == nil {
 			body = next
 		}

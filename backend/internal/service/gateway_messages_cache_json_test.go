@@ -57,3 +57,28 @@ func TestAddMessageCacheBreakpoints_JSONStringEscaping(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIConvertedRollingCacheBreakpoint(t *testing.T) {
+	body := []byte(`{
+		"system":[{"type":"text","text":"stable","cache_control":{"type":"ephemeral","ttl":"5m"}}],
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"turn one"}]},
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"hidden","signature":"sig"},
+				{"type":"text","text":"reply"}
+			]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]},
+			{"role":"assistant","content":[{"type":"thinking","thinking":"still hidden","signature":"sig2"}]}
+		]
+	}`)
+
+	out := applyOpenAIConvertedRollingCacheBreakpoint(body)
+	require.Equal(t, "5m", gjson.GetBytes(out, "messages.2.content.0.cache_control.ttl").String())
+	require.False(t, gjson.GetBytes(out, "messages.0.content.0.cache_control").Exists())
+	require.False(t, gjson.GetBytes(out, "messages.3.content.0.cache_control").Exists())
+	require.Equal(t, "5m", gjson.GetBytes(out, "system.0.cache_control.ttl").String())
+
+	marked := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"kept","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
+	kept := applyOpenAIConvertedRollingCacheBreakpoint(marked)
+	require.Equal(t, "1h", gjson.GetBytes(kept, "messages.0.content.0.cache_control.ttl").String())
+}
