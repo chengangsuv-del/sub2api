@@ -111,7 +111,8 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		anthropicBody = s.applyClaudeCodeOAuthMimicryToBody(ctx, c, account, anthropicBody, anthropicReq.System, mappedModel)
 	}
 
-	// 7. OpenAI 客户端没有 Anthropic 断点。补到最后一条消息上，再执行上限。
+	// 7. 断点加在伪装之后。伪装会重写 system 并把原 system 挪进 messages 开头，
+	// 提前打断点会停在那段固定文本上。这里只补最后一条消息，不改 system、tools、metadata。
 	anthropicBody = applyOpenAIConvertedRollingCacheBreakpoint(anthropicBody)
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
 
