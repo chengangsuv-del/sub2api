@@ -1,6 +1,7 @@
 package apicompat
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -196,7 +197,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 		content, _ := json.Marshal(inputStr)
 		var system json.RawMessage
 		if len(systemParts) > 0 {
-			system, _ = json.Marshal(strings.Join(systemParts, "\n\n"))
+			system = marshalCachedAnthropicSystem(systemParts)
 		}
 		return system, []AnthropicMessage{{Role: "user", Content: content}}, nil
 	}
@@ -334,7 +335,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 
 	var system json.RawMessage
 	if len(systemParts) > 0 {
-		system, _ = json.Marshal(strings.Join(systemParts, "\n\n"))
+		system = marshalCachedAnthropicSystem(systemParts)
 	}
 
 	return system, messages, nil
@@ -547,6 +548,31 @@ func anthropicContentIsOnlyBlankText(content json.RawMessage) bool {
 	return true
 }
 
+func marshalCachedAnthropicSystem(parts []string) json.RawMessage {
+	system, _ := json.Marshal([]AnthropicContentBlock{{
+		Type:         "text",
+		Text:         strings.Join(parts, "\n\n"),
+		CacheControl: &AnthropicCacheControl{Type: "ephemeral", TTL: "5m"},
+	}})
+	return system
+}
+
+func anthropicCacheControlFromBreakpoint(raw json.RawMessage) *AnthropicCacheControl {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil
+	}
+	var marker struct {
+		TTL string `json:"ttl"`
+	}
+	_ = json.Unmarshal(raw, &marker)
+	cc := &AnthropicCacheControl{Type: "ephemeral"}
+	switch marker.TTL {
+	case "5m", "1h":
+		cc.TTL = marker.TTL
+	}
+	return cc
+}
+
 func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessage, error) {
 	if len(raw) == 0 {
 		return json.Marshal("") // empty string content
@@ -571,24 +597,27 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 		case "input_text", "text":
 			if p.Text != "" {
 				blocks = append(blocks, AnthropicContentBlock{
-					Type: "text",
-					Text: p.Text,
+					Type:         "text",
+					Text:         p.Text,
+					CacheControl: anthropicCacheControlFromBreakpoint(p.PromptCacheBreakpoint),
 				})
 			}
 		case "input_image":
 			src := dataURIToAnthropicImageSource(p.ImageURL)
 			if src != nil {
 				blocks = append(blocks, AnthropicContentBlock{
-					Type:   "image",
-					Source: src,
+					Type:         "image",
+					Source:       src,
+					CacheControl: anthropicCacheControlFromBreakpoint(p.PromptCacheBreakpoint),
 				})
 			}
 		case "input_file":
 			src := dataURIToAnthropicFileSource(p.FileData)
 			if src != nil {
 				blocks = append(blocks, AnthropicContentBlock{
-					Type:   "document",
-					Source: src,
+					Type:         "document",
+					Source:       src,
+					CacheControl: anthropicCacheControlFromBreakpoint(p.PromptCacheBreakpoint),
 				})
 			}
 		}
@@ -625,8 +654,9 @@ func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawM
 		case "output_text", "text":
 			if p.Text != "" {
 				blocks = append(blocks, AnthropicContentBlock{
-					Type: "text",
-					Text: p.Text,
+					Type:         "text",
+					Text:         p.Text,
+					CacheControl: anthropicCacheControlFromBreakpoint(p.PromptCacheBreakpoint),
 				})
 			}
 		}

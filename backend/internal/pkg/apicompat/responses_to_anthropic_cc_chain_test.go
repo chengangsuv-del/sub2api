@@ -100,3 +100,33 @@ func TestCCChain_WellFormedMultiRound(t *testing.T) {
 	}
 	require.True(t, sawA && sawB, "both well-formed calls should be preserved")
 }
+
+func TestCCChain_PromptCacheBreakpointsBecomeAnthropicCacheControl(t *testing.T) {
+	respReq, err := ChatCompletionsToResponses(&ChatCompletionsRequest{
+		Model: "claude-opus-4-8",
+		Messages: []ChatMessage{
+			{Role: "system", Content: json.RawMessage(`[{"type":"text","text":"stable system"}]`)},
+			{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"turn one","prompt_cache_breakpoint":{"ttl":"5m"}}]`)},
+			{Role: "assistant", Content: json.RawMessage(`[{"type":"text","text":"reply one"}]`)},
+			{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"turn two","prompt_cache_breakpoint":{"ttl":"1h"}}]`)},
+		},
+	})
+	require.NoError(t, err)
+	anthReq, err := ResponsesToAnthropicRequest(respReq)
+	require.NoError(t, err)
+
+	var system []AnthropicContentBlock
+	require.NoError(t, json.Unmarshal(anthReq.System, &system))
+	require.Len(t, system, 1)
+	require.NotNil(t, system[0].CacheControl)
+	require.Equal(t, "ephemeral", system[0].CacheControl.Type)
+
+	require.Len(t, anthReq.Messages, 3)
+	first := parseContentBlocks(anthReq.Messages[0].Content)
+	require.NotNil(t, first[len(first)-1].CacheControl)
+	require.Equal(t, "5m", first[len(first)-1].CacheControl.TTL)
+
+	last := parseContentBlocks(anthReq.Messages[2].Content)
+	require.NotNil(t, last[len(last)-1].CacheControl)
+	require.Equal(t, "1h", last[len(last)-1].CacheControl.TTL)
+}
