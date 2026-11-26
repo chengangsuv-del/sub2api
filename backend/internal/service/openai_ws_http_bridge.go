@@ -748,6 +748,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientMessage); changed {
 			clientMessage = rewritten
 		}
+		if account.Platform == PlatformGrok && isGrokPromptRefusal(http.StatusForbidden, bareErrorPayload) {
+			if rewritten, changed := rewriteGrokRequestScopedForbiddenSSE(clientMessage); changed {
+				clientMessage = rewritten
+			}
+		}
 		messages := append(pendingClientMessages, clientMessage)
 		pendingClientMessages = nil
 		pendingClientMessageBytes = 0
@@ -909,6 +914,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		clientMessage := upstreamMessage
 		if eventType == "error" || eventType == "response.failed" {
 			if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientMessage); changed {
+				clientMessage = rewritten
+			}
+		}
+		if account.Platform == PlatformGrok && eventType == "error" && isGrokPromptRefusal(http.StatusForbidden, upstreamMessage) {
+			if rewritten, changed := rewriteGrokRequestScopedForbiddenSSE(clientMessage); changed {
 				clientMessage = rewritten
 			}
 		}

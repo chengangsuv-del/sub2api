@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // isGrokContentPolicyRejection identifies request-scoped safety refusals from
@@ -53,6 +54,20 @@ func isGrokRequestScopedForbidden(statusCode int, responseBody []byte) bool {
 		return false
 	}
 	return true
+}
+
+// isGrokPromptRefusal is the subset of a request-scoped 403 caused by the
+// prompt itself: an explicit content-policy hit, or a bare 403 with no account
+// evidence. Structured non-policy 403s stay on the normal client path.
+func isGrokPromptRefusal(statusCode int, responseBody []byte) bool {
+	if !isGrokRequestScopedForbidden(statusCode, responseBody) {
+		return false
+	}
+	if isGrokContentPolicyRejection(statusCode, responseBody) {
+		return true
+	}
+	trimmed := strings.TrimSpace(string(responseBody))
+	return trimmed == "" || !gjson.Valid(trimmed) || gjson.Get(trimmed, "@this").Type == gjson.Null
 }
 
 func grokForbiddenHasAccountEvidence(responseBody []byte) bool {
@@ -217,12 +232,54 @@ func grokContentPolicyMessage(value string) bool {
 	return false
 }
 
-func grokContentPolicyClientMessage(responseBody []byte) string {
-	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(grokUpstreamErrorMessage(responseBody)))
-	if message == "" {
-		return "Request blocked by upstream content policy"
+const grokRequestScopedForbiddenClientMessage = "检测到违规 prefill，拒绝访问。请移除越狱或注入式 system prompt 后重试。密钥有效，这不是鉴权失败。"
+
+// grokRequestScopedForbiddenClientMessage returns a stable client-facing
+// refusal. DeepSeek Harness classifies any error text that starts with, or
+// otherwise contains, 401/403 as AUTH and shows "API 密钥无效". The message
+// must not contain those status codes, and the HTTP status written to the
+// client must not be 401 or 403.
+func grokRequestScopedForbiddenClientStatus() int {
+	return http.StatusBadRequest
+}
+
+// rewriteGrokRequestScopedForbiddenSSE replaces a streamed request-scoped
+// refusal before it reaches the client. The original payload is retained for
+// account classification; only the copy written downstream changes. A 401 or
+// 403 anywhere in that copy makes DeepSeek Harness report an invalid API key.
+func rewriteGrokRequestScopedForbiddenSSE(payload []byte) ([]byte, bool) {
+	if !gjson.ValidBytes(payload) {
+		return payload, false
 	}
-	return message
+	updated := payload
+	changed := false
+	for _, path := range []string{"response.error.message", "error.message", "message", "error"} {
+		value := gjson.GetBytes(updated, path)
+		if value.Type != gjson.String {
+			continue
+		}
+		next, err := sjson.SetBytes(updated, path, grokRequestScopedForbiddenClientMessage)
+		if err != nil {
+			return payload, false
+		}
+		updated = next
+		changed = true
+	}
+	for _, path := range []string{"response.error.code", "error.code", "code"} {
+		if gjson.GetBytes(updated, path).Type == gjson.Null {
+			continue
+		}
+		next, err := sjson.SetBytes(updated, path, "invalid_request_error")
+		if err != nil {
+			return payload, false
+		}
+		updated = next
+		changed = true
+	}
+	if !changed {
+		return payload, false
+	}
+	return updated, true
 }
 
 // grokUpstreamErrorMessage extends the shared extractor with xAI's flat error

@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestIsGrokContentPolicyRejection(t *testing.T) {
@@ -114,6 +115,25 @@ func TestIsGrokContentPolicyRejection(t *testing.T) {
 			require.Equal(t, tt.want, isGrokContentPolicyRejection(tt.status, []byte(tt.body)))
 		})
 	}
+}
+
+func TestIsGrokPromptRefusal(t *testing.T) {
+	require.True(t, isGrokPromptRefusal(http.StatusForbidden, nil))
+	require.True(t, isGrokPromptRefusal(http.StatusForbidden, []byte("   ")))
+	require.True(t, isGrokPromptRefusal(http.StatusForbidden, []byte(`{"error":{"code":"new_sensitive","message":"image is sensitive"}}`)))
+	require.False(t, isGrokPromptRefusal(http.StatusForbidden, []byte(`{"code":"permission-denied","error":"Access to the chat endpoint is denied"}`)))
+	require.False(t, isGrokPromptRefusal(http.StatusTooManyRequests, nil))
+}
+
+func TestRewriteGrokRequestScopedForbiddenSSERemovesAuthStatus(t *testing.T) {
+	raw := []byte(`{"error":{"code":"permission-denied","message":"403 permission denied"}}`)
+	got, changed := rewriteGrokRequestScopedForbiddenSSE(raw)
+	require.True(t, changed)
+	require.NotContains(t, string(got), "403")
+	require.NotContains(t, string(got), "401")
+	require.Contains(t, string(got), grokRequestScopedForbiddenClientMessage)
+	require.Equal(t, "invalid_request_error", gjson.GetBytes(got, "error.code").String())
+	require.Equal(t, string(raw), `{"error":{"code":"permission-denied","message":"403 permission denied"}}`)
 }
 
 func TestGrokContentPolicy403DoesNotMutateOrFailover(t *testing.T) {

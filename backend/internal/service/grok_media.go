@@ -1288,8 +1288,8 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 		upstreamDetail = truncateString(string(body), maxBytes)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
-	if isGrokRequestScopedForbidden(resp.StatusCode, body) {
-		clientMsg := grokContentPolicyClientMessage(body)
+	if isGrokPromptRefusal(resp.StatusCode, body) {
+		clientMsg := grokRequestScopedForbiddenClientMessage
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),
@@ -1303,7 +1303,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 			Detail:             upstreamDetail,
 		})
 		MarkResponseCommitted(c)
-		writeGrokMediaErrorResponse(c, http.StatusForbidden, "invalid_request_error", clientMsg, grokUpstreamErrorCode(body))
+		writeGrokMediaErrorResponse(c, grokRequestScopedForbiddenClientStatus(), "invalid_request_error", clientMsg, "")
 		return nil, fmt.Errorf("grok content policy rejection: %s", clientMsg)
 	}
 
