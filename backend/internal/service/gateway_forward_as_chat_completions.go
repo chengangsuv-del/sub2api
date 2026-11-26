@@ -111,7 +111,8 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		anthropicBody = s.applyClaudeCodeOAuthMimicryToBody(ctx, c, account, anthropicBody, anthropicReq.System, mappedModel)
 	}
 
-	// 7. Enforce cache_control block limit
+	// 7. OpenAI 客户端没有 Anthropic 断点。补到最后一条消息上，再执行上限。
+	anthropicBody = applyOpenAIConvertedRollingCacheBreakpoint(anthropicBody)
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
 
 	// 8. Get access token
